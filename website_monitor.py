@@ -1,12 +1,10 @@
-# MODIFIED SCRIPT FOR GITHUB ACTIONS
-
 import requests
 import hashlib
 import os
 from datetime import datetime
+from bs4 import BeautifulSoup # Import BeautifulSoup
 
 # --- Constants for GitHub Actions ---
-# The path where the hash file will be stored as an artifact
 ARTIFACT_PATH = 'state/last_hash.txt'
 
 class WebsiteMonitor:
@@ -15,7 +13,7 @@ class WebsiteMonitor:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.last_hash = None
-        self.hash_file_path = ARTIFACT_PATH # Use the artifact path
+        self.hash_file_path = ARTIFACT_PATH
 
     def get_page_content(self):
         try:
@@ -28,13 +26,23 @@ class WebsiteMonitor:
             self.send_telegram_message(f"🚨 <b>MONITOR ERROR</b>\n\nCould not fetch {self.url}.\nError: {e}")
             return None
 
+    # NEW FUNCTION: Extracts only the relevant part of the HTML
+    def extract_relevant_content(self, html_content):
+        """Parse HTML and return the content of the body tag."""
+        if not html_content:
+            return ""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        # We find the <body> tag. This is much more stable than the full HTML.
+        body = soup.find('body')
+        if body:
+            return str(body)
+        return html_content # Fallback to full content if body isn't found
+
     def calculate_hash(self, content):
         return hashlib.md5(content.encode('utf-8')).hexdigest()
 
-    # MODIFIED: Load hash from the artifact file
     def load_last_hash(self):
         try:
-            # Check if the artifact was downloaded and the file exists
             if os.path.exists(self.hash_file_path):
                 with open(self.hash_file_path, 'r') as f:
                     return f.read().strip()
@@ -42,10 +50,8 @@ class WebsiteMonitor:
             print(f"Error loading hash: {e}")
         return None
 
-    # MODIFIED: Save hash to the artifact file
     def save_hash(self, hash_value):
         try:
-            # GitHub Actions needs the directory to exist before writing a file
             os.makedirs(os.path.dirname(self.hash_file_path), exist_ok=True)
             with open(self.hash_file_path, 'w') as f:
                 f.write(hash_value)
@@ -65,7 +71,6 @@ class WebsiteMonitor:
             print(f"Error sending Telegram message: {e}")
             return False
 
-    # RENAMED from check_for_changes to run_check
     def run_check(self):
         print(f"Checking website at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -74,13 +79,17 @@ class WebsiteMonitor:
             print("Failed to fetch website content, stopping check.")
             return
 
-        current_hash = self.calculate_hash(content)
+        # THE KEY CHANGE IS HERE: We now process the content before hashing
+        relevant_content = self.extract_relevant_content(content)
+        current_hash = self.calculate_hash(relevant_content)
+        
         self.last_hash = self.load_last_hash()
 
+        # The rest of the logic is now reliable
         if self.last_hash is None:
             self.save_hash(current_hash)
             print("First run - baseline hash saved.")
-            message = f"🎭 <b>Website Monitor Started</b>\n\nNow monitoring: {self.url}\nYou'll be notified when the site changes!"
+            message = f"🎭 <b>Website Monitor Started</b>\n\nNow monitoring: {self.url}\nYou will be notified ONLY when the site's body content changes."
             self.send_telegram_message(message)
         elif current_hash != self.last_hash:
             print("Website has changed!")
@@ -91,10 +100,7 @@ class WebsiteMonitor:
         else:
             print("No changes detected.")
 
-# MODIFIED: The main execution block. No more loops or sleep.
 def main():
-    # --- Configuration from Environment Variables ---
-    # We will set these in GitHub Secrets, which is much more secure.
     WEBSITE_URL = os.getenv("WEBSITE_URL")
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     CHAT_ID = os.getenv("CHAT_ID")
@@ -104,7 +110,7 @@ def main():
         return
 
     monitor = WebsiteMonitor(WEBSITE_URL, BOT_TOKEN, CHAT_ID)
-    monitor.run_check() # Run the check just once.
+    monitor.run_check()
 
 if __name__ == "__main__":
     main()
