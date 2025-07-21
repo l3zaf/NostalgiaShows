@@ -18,7 +18,7 @@ jobs:
     steps:
       # Step 1: Download the last saved hash from the previous run
       - name: Download last hash artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: last-hash
           path: state # Download it into a folder named 'state'
@@ -50,7 +50,7 @@ jobs:
         
       # Step 6: Upload the new hash file for the next run
       - name: Upload new hash as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: last-hash # Must match the download name
           path: state/last_hash.txt # The path to the file your script created
