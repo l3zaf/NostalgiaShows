@@ -1,0 +1,56 @@
+# This is the instruction manual for GitHub
+
+name: Website Change Monitor
+
+on:
+  # This makes the script run on a schedule
+  schedule:
+    # Runs every 5 minutes. The cron syntax is tricky, but '*/5' means 'every 5'.
+    - cron: '*/5 * * * *'
+  
+  # This allows you to run the script manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  run-monitor-script:
+    runs-on: ubuntu-latest # Use a standard Linux virtual machine
+
+    steps:
+      # Step 1: Download the last saved hash from the previous run
+      - name: Download last hash artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: last-hash
+          path: state # Download it into a folder named 'state'
+        # Continue even if it fails (it will fail on the very first run)
+        continue-on-error: true
+
+      # Step 2: Check out your repository code
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      # Step 3: Set up the Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # Step 4: Install the necessary Python packages from your requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Step 5: Run your Python script!
+      - name: Run website monitor
+        env:
+          # This securely injects the secrets you created into the script
+          WEBSITE_URL: ${{ secrets.WEBSITE_URL }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python website_monitor.py
+        
+      # Step 6: Upload the new hash file for the next run
+      - name: Upload new hash as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: last-hash # Must match the download name
+          path: state/last_hash.txt # The path to the file your script created
