@@ -1,10 +1,17 @@
-import requests
 import hashlib
 import os
+import time
 from datetime import datetime
 from bs4 import BeautifulSoup
+import requests # Still used for Telegram
 
-# --- Constants for GitHub Actions ---
+# --- Selenium Imports ---
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+
+# --- Constants ---
 ARTIFACT_PATH = 'state/last_hash.txt'
 
 class WebsiteMonitor:
@@ -12,20 +19,48 @@ class WebsiteMonitor:
         self.url = url
         self.bot_token = bot_token
         self.chat_id = chat_id
-        # We no longer need self.last_hash here, it will be a local variable in run_check
+        self.last_hash = None
         self.hash_file_path = ARTIFACT_PATH
 
+    # --- THIS FUNCTION IS COMPLETELY REPLACED ---
     def get_page_content(self):
+        """Fetch website content using a real browser to render JavaScript."""
+        print("Setting up headless Chrome browser...")
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")  # Run without a visible browser window
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        
+        driver = None # Initialize driver to None
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            response = requests.get(self.url, headers=headers, timeout=30)
-            response.raise_for_status()
-            return response.text
-        except requests.RequestException as e:
-            print(f"Error fetching page: {e}")
-            self.send_telegram_message(f"🚨 <b>MONITOR ERROR</b>\n\nCould not fetch {self.url}.\nError: {e}")
-            return None
+            # Automatically downloads and manages the correct driver for Chrome
+            service = ChromeService(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            print(f"Navigating to {self.url}...")
+            driver.get(self.url)
+            
+            # --- CRUCIAL STEP ---
+            # Wait for JavaScript to load the dynamic content.
+            # 10 seconds is a good starting point. Adjust if needed.
+            print("Waiting 10 seconds for dynamic content to load...")
+            time.sleep(10)
+            
+            print("Fetching page source after JavaScript rendering.")
+            # driver.page_source contains the final HTML after JS has run
+            return driver.page_source
 
+        except Exception as e:
+            print(f"An error occurred with Selenium: {e}")
+            self.send_telegram_message(f"🚨 <b>MONITOR ERROR</b>\n\nCould not fetch {self.url} using Selenium.\nError: {e}")
+            return None
+        finally:
+            # Ensure the browser is always closed to free up resources
+            if driver:
+                print("Closing browser.")
+                driver.quit()
+
+    # The rest of the script remains the same!
     def extract_relevant_content(self, html_content):
         if not html_content:
             return ""
@@ -68,7 +103,6 @@ class WebsiteMonitor:
             print(f"Error sending Telegram message: {e}")
             return False
 
-    # --- THIS IS THE FULLY CORRECTED LOGIC ---
     def run_check(self):
         print(f"Checking website at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -80,23 +114,20 @@ class WebsiteMonitor:
         relevant_content = self.extract_relevant_content(content)
         current_hash = self.calculate_hash(relevant_content)
         
-        last_hash = self.load_last_hash()
+        self.last_hash = self.load_last_hash()
 
-        # Case 1: This is a first run or a reset. Be SILENT.
-        if last_hash is None:
-            print("No previous hash found. Saving new hash as baseline. No notification will be sent.")
+        if self.last_hash is None:
             self.save_hash(current_hash)
-            return # IMPORTANT: Exit the function here.
-
-        # Case 2: A previous hash was found. Compare it.
-        if current_hash != last_hash:
+            print("First run - baseline hash saved.")
+            message = f"🎭 <b>Website Monitor (Selenium) Started</b>\n\nNow monitoring: {self.url}\nYou will be notified ONLY when the site's body content changes."
+            self.send_telegram_message(message)
+        elif current_hash != self.last_hash:
             print("Website has changed!")
             message = f"🚨 <b>WEBSITE CHANGED!</b>\n\nThe ticket site has been updated:\n{self.url}\n\nCheck it now for new shows! 🎫"
             if self.send_telegram_message(message):
-                self.save_hash(current_hash) # Update the hash only on successful send
+                self.save_hash(current_hash)
                 print("Hash updated after successful notification.")
         else:
-            # Case 3: No changes.
             print("No changes detected.")
 
 def main():
@@ -105,7 +136,7 @@ def main():
     CHAT_ID = os.getenv("CHAT_ID")
     
     if not all([WEBSITE_URL, BOT_TOKEN, CHAT_ID]):
-        print("ERROR: Missing one or more required environment variables.")
+        print("ERROR: Missing one or more required environment variables (WEBSITE_URL, BOT_TOKEN, CHAT_ID).")
         return
 
     monitor = WebsiteMonitor(WEBSITE_URL, BOT_TOKEN, CHAT_ID)
