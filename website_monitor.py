@@ -2,7 +2,7 @@ import requests
 import hashlib
 import os
 from datetime import datetime
-from bs4 import BeautifulSoup # Import BeautifulSoup
+from bs4 import BeautifulSoup
 
 # --- Constants for GitHub Actions ---
 ARTIFACT_PATH = 'state/last_hash.txt'
@@ -12,7 +12,7 @@ class WebsiteMonitor:
         self.url = url
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.last_hash = None
+        # We no longer need self.last_hash here, it will be a local variable in run_check
         self.hash_file_path = ARTIFACT_PATH
 
     def get_page_content(self):
@@ -26,17 +26,14 @@ class WebsiteMonitor:
             self.send_telegram_message(f"🚨 <b>MONITOR ERROR</b>\n\nCould not fetch {self.url}.\nError: {e}")
             return None
 
-    # NEW FUNCTION: Extracts only the relevant part of the HTML
     def extract_relevant_content(self, html_content):
-        """Parse HTML and return the content of the body tag."""
         if not html_content:
             return ""
         soup = BeautifulSoup(html_content, 'html.parser')
-        # We find the <body> tag. This is much more stable than the full HTML.
         body = soup.find('body')
         if body:
             return str(body)
-        return html_content # Fallback to full content if body isn't found
+        return html_content
 
     def calculate_hash(self, content):
         return hashlib.md5(content.encode('utf-8')).hexdigest()
@@ -71,6 +68,7 @@ class WebsiteMonitor:
             print(f"Error sending Telegram message: {e}")
             return False
 
+    # --- THIS IS THE FULLY CORRECTED LOGIC ---
     def run_check(self):
         print(f"Checking website at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -79,25 +77,26 @@ class WebsiteMonitor:
             print("Failed to fetch website content, stopping check.")
             return
 
-        # THE KEY CHANGE IS HERE: We now process the content before hashing
         relevant_content = self.extract_relevant_content(content)
         current_hash = self.calculate_hash(relevant_content)
         
-        self.last_hash = self.load_last_hash()
+        last_hash = self.load_last_hash()
 
-        # The rest of the logic is now reliable
-        if self.last_hash is None:
+        # Case 1: This is a first run or a reset. Be SILENT.
+        if last_hash is None:
+            print("No previous hash found. Saving new hash as baseline. No notification will be sent.")
             self.save_hash(current_hash)
-            print("First run - baseline hash saved.")
-            message = f"🎭 <b>Website Monitor Started</b>\n\nNow monitoring: {self.url}\nYou will be notified ONLY when the site's body content changes."
-            self.send_telegram_message(message)
-        elif current_hash != self.last_hash:
+            return # IMPORTANT: Exit the function here.
+
+        # Case 2: A previous hash was found. Compare it.
+        if current_hash != last_hash:
             print("Website has changed!")
             message = f"🚨 <b>WEBSITE CHANGED!</b>\n\nThe ticket site has been updated:\n{self.url}\n\nCheck it now for new shows! 🎫"
             if self.send_telegram_message(message):
-                self.save_hash(current_hash)
+                self.save_hash(current_hash) # Update the hash only on successful send
                 print("Hash updated after successful notification.")
         else:
+            # Case 3: No changes.
             print("No changes detected.")
 
 def main():
@@ -106,7 +105,7 @@ def main():
     CHAT_ID = os.getenv("CHAT_ID")
     
     if not all([WEBSITE_URL, BOT_TOKEN, CHAT_ID]):
-        print("ERROR: Missing one or more required environment variables (WEBSITE_URL, BOT_TOKEN, CHAT_ID).")
+        print("ERROR: Missing one or more required environment variables.")
         return
 
     monitor = WebsiteMonitor(WEBSITE_URL, BOT_TOKEN, CHAT_ID)
